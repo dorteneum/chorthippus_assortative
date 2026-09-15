@@ -1,0 +1,463 @@
+---
+title: "Calculating the Strength of Reproductive Isolation"
+output: pdf_document
+date: "2026-09-06"
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Strength of RI
+
+Here, we calculate the strength of RI using the formula from [@sobel2014], where strength of RI is: 1 - 2\*(heterospecific/ (heterospecific + conspecific)). We use the simple bootstrapping method described by [@zhang2024role].
+
+Changes from v1 to v2: Calculation of _female acceptance_ instead of _female rejection_ by calculating acceptance as 1-female rejection. 
+
+v2 also calculates the absolute and relative contributions of each behavior to total reproductive isolation as described by [@ramsey2003components].
+
+### Packages and libraries
+
+```{r}
+#set wd
+setwd('/dss/dsslegfs01/pr53da/pr53da-dss-0029/big_assortative')
+
+# load libraries and packages
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+#Load the file. 
+hoppers <- read.csv("hoppers2_femresp_corrected.csv", sep = ";")
+
+#Creating a fail column to convert into sucess/fail data 
+hoppers$Response_fail <- hoppers$Total.Singing - hoppers$Response
+hoppers$Rejection_fail <- hoppers$Harassment - hoppers$Hrejection
+
+# Ensure origin variables are factors
+hoppers$Type.F <- factor(hoppers$Type.F)  # lab / wild
+hoppers$Type.M <- factor(hoppers$Type.M)
+
+# Flags and combined origin
+hoppers$FemaleWild <- hoppers$Type.F == "wild"
+hoppers$MaleWild   <- hoppers$Type.M == "wild"
+hoppers$AnyWild    <- hoppers$FemaleWild | hoppers$MaleWild
+hoppers$BothLab    <- !hoppers$FemaleWild & !hoppers$MaleWild
+
+hoppers$OriginPair <- interaction(hoppers$Type.F, hoppers$Type.M, sep = "_")
+
+#Response 
+hoppers$ResponseNorm <- (hoppers$Response/hoppers$Total.Singing)  
+resp <- hoppers[-which(hoppers$ResponseNorm == "NaN"), ]      
+#resp <- resp[-which(resp$ResponseNorm == "Inf"), ]
+
+#Rejection
+hoppers$RejectNorm <- (hoppers$Hrejection/hoppers$Harassment)
+rej <- hoppers[-which(hoppers$RejectNorm == "NaN"), ] 
+
+# Response: remove rows where Total.Singing = 0 (NaN in proportion)
+resp <- subset(hoppers, !is.nan(ResponseNorm))
+
+# Rejection: remove rows where Harassment = 0 (NaN in proportion)
+rej  <- subset(hoppers, !is.nan(RejectNorm))
+
+# add before the behavior_list
+hoppers$AcceptNorm <- 1 - hoppers$RejectNorm 
+
+```
+
+## All combinations
+
+```{r}
+# define the species pairs
+species_pairs <- list( c("Big", "Bru"), c("Big", "Mol"), c("Bru", "Mol"))
+```
+
+### Behaviors list
+
+```{r}
+## list all behaviors and data sets, here we specify the type of distribution for the parametric bootstrapping.
+## we also add a sign for each behavior, as female rejection gives a negative RI value (more heterospecific interactions than conspecific), and we want it to be to a positive value for comparing it with other values
+
+##v2: sign for each behavior is no longer relevant, as we are now calculating female acceptance instead of female rejection
+
+behavior_list <- list(
+  Mounting_Attempt = list(
+    data = hoppers,
+    behavior_col = "Harassment",
+    dist         = "nbinom",
+    sign         = +1
+  ),
+  Call_Singing = list(
+    data = hoppers,
+    behavior_col = "Singing",
+    dist         = "nbinom",
+    sign         = +1
+  ),
+  Courtship_Singing = list(
+    data = hoppers,
+    behavior_col = "Active.Singing",
+    dist         = "nbinom",
+    sign         = +1
+  ),
+  Female_Response = list(
+    data = hoppers,
+    behavior_col = "ResponseNorm",
+    dist         = "binomial",
+    sign         = +1
+  ),
+   #Female_Rejection = list(
+    #data = hoppers,
+    #behavior_col = "RejectNorm",
+    #dist         = "binomial",
+    #sign         = -1
+  #),
+  Female_Acceptance = list(
+    data = hoppers,
+    behavior_col = "AcceptNorm",
+    dist         = "binomial",
+    sign         = +1    
+  ),
+  Mating = list(
+    data = hoppers,
+    behavior_col = "Mating",
+   dist         = "binomial",
+    sign         = +1
+  )
+)
+```
+
+## Computing RI
+
+```{r}
+# Calculate RI for each pair for each behavior
+compute_RI_pair <- function(df, sp1, sp2, male_col, female_col, behavior_col) {
+  cons_rows <- 
+    (df[[male_col]] == sp1 & df[[female_col]] == sp1) |
+    (df[[male_col]] == sp2 & df[[female_col]] == sp2)
+  
+  het_rows  <- 
+    (df[[male_col]] == sp1 & df[[female_col]] == sp2) |
+    (df[[male_col]] == sp2 & df[[female_col]] == sp1)
+  
+  cons_vals <- df[[behavior_col]][cons_rows]
+  het_vals  <- df[[behavior_col]][het_rows]
+  
+  C <- mean(cons_vals, na.rm = TRUE)
+  H <- mean(het_vals,  na.rm = TRUE)
+  
+  RI <- 1 - 2 * (H / (H + C))
+  
+  list(
+    C = C, H = H, RI = RI,
+    cons_vals = cons_vals,
+    het_vals  = het_vals,
+    cons_idx  = cons_rows,
+    het_idx   = het_rows
+  )
+}
+
+```
+
+## Simple bootstrapping
+
+```{r}
+## Bootstrap function for 1 species pair & 1 behavior
+## This resamples rows WITH replacement, maintaining the species pair structure.
+
+bootstrap_RI_simple <- function(df, sp1, sp2, male_col, female_col, behavior_col,
+                                sign = 1,
+                                nboot = 10000) {
+  
+  base <- compute_RI_pair(df, sp1, sp2, male_col, female_col, behavior_col)
+  
+  cons_vals <- base$cons_vals[!is.na(base$cons_vals)]
+  het_vals  <- base$het_vals[!is.na(base$het_vals)]
+  
+  n_con <- length(cons_vals)
+  n_het <- length(het_vals)
+  
+  if (n_con == 0 || n_het == 0) {
+    stop("No conspecific or heterospecific data for this species pair.")
+  }
+  
+  RI_boot <- numeric(nboot)
+  
+  for (b in seq_len(nboot)) {
+    sim_con <- sample(cons_vals, n_con, replace = TRUE)
+    sim_het <- sample(het_vals,  n_het, replace = TRUE)
+    
+    Cb <- mean(sim_con)
+    Hb <- mean(sim_het)
+    
+    RIb <- 1 - 2 * (Hb / (Hb + Cb))
+    RI_boot[b] <- sign * RIb   # apply sign flip inside bootstrap -- can be removed
+  }
+  
+  # Signed final values
+  RI_signed <- sign * base$RI
+  
+  CI <- quantile(RI_boot, c(0.025, 0.975), na.rm = TRUE)
+  
+  list(
+    C        = base$C,
+    H        = base$H,
+    RI       = RI_signed,
+    CI_lower = CI[1],
+    CI_upper = CI[2],
+    n_con    = n_con,
+    n_het    = n_het,
+    RI_boot  = RI_boot
+  )
+}
+
+```
+
+```{r}
+## Loop over all behaviors × species pairs with 10000 bootstraps
+
+results_simple <- data.frame()
+
+for (beh in names(behavior_list)) {
+  
+  df    <- behavior_list[[beh]]$data
+  bcol  <- behavior_list[[beh]]$behavior_col
+  dist  <- behavior_list[[beh]]$dist
+  sign  <- ifelse(is.null(behavior_list[[beh]]$sign), 1, behavior_list[[beh]]$sign)
+  
+  for (i in seq_along(species_pairs)) {
+    
+    sp1 <- species_pairs[[i]][1]
+    sp2 <- species_pairs[[i]][2]
+    
+    base <- compute_RI_pair(df, sp1, sp2, "Male", "Female", bcol)
+    
+    n_con <- sum(!is.na(base$cons_vals))
+    n_het <- sum(!is.na(base$het_vals))
+    
+    if (n_con == 0 || n_het == 0) next
+    
+    out <- bootstrap_RI_simple(
+      df           = df,
+      sp1          = sp1,
+      sp2          = sp2,
+      male_col     = "Male",
+      female_col   = "Female",
+      behavior_col = bcol,
+      sign         = sign,
+      nboot        = 10000
+    )
+    
+    row <- data.frame(
+      behavior     = beh,
+      species_pair = paste(sp1, sp2, sep = "-"),
+      C            = out$C,
+      H            = out$H,
+      RI           = out$RI,
+      CI_lower     = out$CI_lower,
+      CI_upper     = out$CI_upper,
+      n_cons       = out$n_con,
+      n_het        = out$n_het
+    )
+    
+    results_simple <- rbind(results_simple, row)
+  }
+}
+results_simple
+```
+
+```{r}
+## Plotting results
+plot_RI_single <- function(results_df,
+                           dodge_width = 0.6,
+                           point_size = 3,
+                           line_size = 0.7) {
+  
+  library(ggplot2)
+  
+  # Desired behavior order (adjust names if needed)
+  desired_order <- c("Call_Singing",
+                     "Courtship_Singing",
+                     "Female_Response",
+                     "Mounting_Attempt",
+                     "Female_Acceptance",
+                     "Mating")
+  
+  # Ensure behavior column respects this order
+  present_beh <- intersect(desired_order, unique(as.character(results_df$behavior)))
+  results_df$behavior <- factor(results_df$behavior, levels = present_beh)
+  
+  # Factor species_pair for consistent coloring
+  results_df$species_pair <- factor(results_df$species_pair)
+  
+  # Y-axis breaks every 0.2 from 0 to 1
+  ybreaks <- seq(-0.4, 1, by = 0.2)
+  
+  # Plot
+  p <- ggplot(results_df, aes(x = behavior, y = RI, color = species_pair)) +
+    geom_point(position = position_dodge(width = dodge_width),
+               size = point_size) +
+    geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper),
+                  position = position_dodge(width = dodge_width),
+                  width = 0.2,
+                  linewidth = line_size) +
+    scale_y_continuous(breaks = ybreaks, limits = c(-0.4,1)) +
+    theme_bw(base_size = 14) +
+    labs(
+      x = "Behavior",
+      y = "Reproductive isolation (RI)",
+      color = "Species pair"
+    ) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      panel.grid.major.x = element_blank()
+    )
+  
+  return(p)
+}
+
+```
+
+```{r}
+## plot
+
+#p_bootsimple <- 
+simple_plot <- plot_RI_single(results_simple)
+simple_plot
+```
+
+```{r}
+## Save & export plots
+
+p_simple <- plot_RI_single(results_simple)
+ggsave("RI_simple_10k_v2.svg", p_simple, device="svg", width=10, height=6, units="in")
+ggsave("RI_simple_10k_v2.png", p_simple, device="png", width=10, height=6, units="in", dpi=500)
+```
+
+## Calculation of absolute and relative contributions
+
+```{r}
+# Behaviors in their fixed temporal courtship order.
+behavior_sequence <- list(
+  list(name = "Call_Singing",       col = "Singing",        sign = +1),
+  list(name = "Courtship_Singing",  col = "Active.Singing",  sign = +1),
+  list(name = "Female_Response",    col = "ResponseNorm",    sign = +1),
+  list(name = "Mounting_Attempt",   col = "Harassment",      sign = +1),
+  list(name = "Female_Acceptance",  col = "AcceptNorm",      sign = +1),
+  list(name = "Mating",             col = "Mating",          sign = +1)
+)
+
+bootstrap_AC_sequence <- function(df, sp1, sp2, male_col, female_col,
+                                   behavior_sequence, nboot = 10000) {
+
+  cons_rows_idx <- which((df[[male_col]] == sp1 & df[[female_col]] == sp1) |
+                          (df[[male_col]] == sp2 & df[[female_col]] == sp2))
+  het_rows_idx  <- which((df[[male_col]] == sp1 & df[[female_col]] == sp2) |
+                          (df[[male_col]] == sp2 & df[[female_col]] == sp1))
+
+  n_con <- length(cons_rows_idx)
+  n_het <- length(het_rows_idx)
+  if (n_con == 0 || n_het == 0) stop("No conspecific or heterospecific data for this pair.")
+
+  n_beh <- length(behavior_sequence)
+  beh_names <- sapply(behavior_sequence, function(x) x$name)
+
+  # storage: one row per bootstrap replicate, one column per behavior
+  RI_mat <- matrix(NA_real_, nrow = nboot, ncol = n_beh, dimnames = list(NULL, beh_names))
+  AC_mat <- matrix(NA_real_, nrow = nboot, ncol = n_beh, dimnames = list(NULL, beh_names))
+
+  for (b in seq_len(nboot)) {
+
+    # resample TRIALS ONCE per replicate — same resampled rows feed every behavior
+    sim_con_idx <- sample(cons_rows_idx, n_con, replace = TRUE)
+    sim_het_idx <- sample(het_rows_idx,  n_het, replace = TRUE)
+
+    sim_con <- df[sim_con_idx, ]
+    sim_het <- df[sim_het_idx, ]
+
+    RI_row <- numeric(n_beh)
+    for (k in seq_len(n_beh)) {
+      col  <- behavior_sequence[[k]]$col
+      sign <- behavior_sequence[[k]]$sign
+
+      C <- mean(sim_con[[col]], na.rm = TRUE)
+      H <- mean(sim_het[[col]], na.rm = TRUE)
+
+      RI_row[k] <- sign * (1 - 2 * (H / (H + C)))
+    }
+    RI_mat[b, ] <- RI_row
+
+    # sequential absolute contribution: each behavior only acts on the
+    # fraction of heterospecific pairs not already excluded upstream
+    cum <- 0
+    AC_row <- numeric(n_beh)
+    for (k in seq_len(n_beh)) {
+      AC_row[k] <- RI_row[k] * (1 - cum)
+      cum <- cum + AC_row[k]
+    }
+    AC_mat[b, ] <- AC_row
+  }
+
+  # relative contribution per replicate: AC_i / total AC (row-wise)
+  total_AC <- rowSums(AC_mat)
+  RC_mat <- AC_mat / total_AC
+
+  summarize_col <- function(mat) {
+    data.frame(
+      behavior = beh_names,
+      mean     = colMeans(mat, na.rm = TRUE),
+      CI_lower = apply(mat, 2, quantile, probs = 0.025, na.rm = TRUE),
+      CI_upper = apply(mat, 2, quantile, probs = 0.975, na.rm = TRUE)
+    )
+  }
+
+  list(
+    RI_summary = summarize_col(RI_mat),
+    AC_summary = summarize_col(AC_mat),
+    RC_summary = summarize_col(RC_mat),
+    RI_mat = RI_mat, AC_mat = AC_mat, RC_mat = RC_mat
+  )
+}
+
+```
+
+```{r}
+#Loop it over all three species pairs
+AC_results <- list()
+
+for (i in seq_along(species_pairs)) {
+  sp1 <- species_pairs[[i]][1]
+  sp2 <- species_pairs[[i]][2]
+  pair_name <- paste(sp1, sp2, sep = "-")
+
+  AC_results[[pair_name]] <- bootstrap_AC_sequence(
+    df = hoppers, sp1 = sp1, sp2 = sp2,
+    male_col = "Male", female_col = "Female",
+    behavior_sequence = behavior_sequence,
+    nboot = 10000
+  )
+}
+
+# assemble a tidy table for the manuscript
+AC_table <- do.call(rbind, lapply(names(AC_results), function(p) {
+  df <- AC_results[[p]]$AC_summary
+  df$species_pair <- p
+  df
+}))
+RC_table <- do.call(rbind, lapply(names(AC_results), function(p) {
+  df <- AC_results[[p]]$RC_summary
+  df$species_pair <- p
+  df
+}))
+```
+
+```{r}
+#export tidy tables
+write.table(AC_table, file = "AC_results.csv", col.names = TRUE)
+write.table(RC_table, file = "RC_results.csv", col.names = TRUE)
+
+```
+
+## References
+
