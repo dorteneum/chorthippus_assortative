@@ -1,0 +1,1105 @@
+---
+title: "review_GLMM_glmmTMB_v2"
+date: "2025-12-05"
+output: pdf_document
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Packages
+
+```{r}
+.libPaths(c(.libPaths(),"/dss/dsshome1/lxc06/ru87mis/Rstudio/4.4"))
+
+#set wd
+setwd('/dss/dsslegfs01/pr53da/pr53da-dss-0029/big_assortative')
+
+#Load the file. 
+hoppers <- read.csv("hoppers2_femresp_corrected.csv", sep = ";")
+#View(hoppers)
+
+
+## THIS VERSION USES THE PACKAGE GLMMTMB INSTEAD OF LME4 TO FIT THE GLMMs
+
+# Install required packages 
+install.packages("glmmTMB") #GLMM modeling
+install.packages("bbmle") #required for glmmTMB package
+install.packages('DHARMa') #goodness of fit test
+install.packages('emmeans') #strength of RI
+install.packages('car')
+
+# Load packages
+library(dplyr)
+library(stringr)
+#library(reshape)
+#library(reshape2) 
+library(tidyr)
+#library(lme4)
+library(ggplot2)
+library(car)
+
+library(glmmTMB)
+library(bbmle)
+library(DHARMa)
+library(emmeans)
+```
+
+# REVIEW 1
+
+Date of review: Oct 2025 Date of edits: Dec 2025
+
+Here, we try to address the issues raised by the reviewers for the first version of our submitted paper.
+
+Changes:
+
+\- After discussing with Dirk, we will add the origin (Type.F/Type.M) to the model as a fixed effect factor.
+
+\- To avoid confusion, for the reviewed version, we have changed the naming of the models.
+The reduced models are now called additive models and the saturated models are not called interaction models.
+
+\- To check whether the results are not affected by the type of analysis, i.e.
+GLM or GLMMM, I have run the GLMs for all behaviors and combinations, not only for those that raised convergence or singularity issues.
+-- This section is no longer relevant, since only a single model raised convergence issues with the glmmTMB pacakge.
+
+\- To improve model fitting and reduce singularity and convergence issues, we used the 'glmmTMB' package, which did not throw back singularity or convergence issues, and therefore we will move forward with this package for our analysis.
+- Check model fit and residual plots using DHARMa package.
+
+\- Since DHARMa showed issues for most of the models in one way or another, here, in v2 of the code, first, we are replacing the family type for fitting the models from poisson to negative binomial (nbinom2), for those that used a poisson distribution.
+
+Species Key:
+
+Bru - C.
+brunneus
+
+Big - C.biguttulus
+
+Mol - C.mollis
+
+# DATA CURATION
+
+For the Female Behaviors we need to use a binomial distribution, and use data on the success and fail events on each experiment.
+
+```{r}
+#Creating a fail column to convert into sucess/fail data 
+hoppers$Response_fail <- hoppers$Total.Singing - hoppers$Response
+hoppers$Rejection_fail <- hoppers$Harassment - hoppers$Hrejection
+
+```
+
+For the female behaviors we created separate datasets so we can delete the rows where males didn't perform the behavior.
+
+```{r}
+# Ensure origin variables are factors
+hoppers$Type.F <- factor(hoppers$Type.F)  # lab / wild
+hoppers$Type.M <- factor(hoppers$Type.M)
+
+# Flags and combined origin
+hoppers$FemaleWild <- hoppers$Type.F == "wild"
+hoppers$MaleWild   <- hoppers$Type.M == "wild"
+hoppers$AnyWild    <- hoppers$FemaleWild | hoppers$MaleWild
+hoppers$BothLab    <- !hoppers$FemaleWild & !hoppers$MaleWild
+
+hoppers$OriginPair <- interaction(hoppers$Type.F, hoppers$Type.M, sep = "_")
+
+#Response 
+hoppers$ResponseNorm <- (hoppers$Response/hoppers$Total.Singing)  
+resp <- hoppers[-which(hoppers$ResponseNorm == "NaN"), ]      
+#resp <- resp[-which(resp$ResponseNorm == "Inf"), ]
+
+#Rejection
+hoppers$RejectNorm <- (hoppers$Hrejection/hoppers$Harassment)
+rej <- hoppers[-which(hoppers$RejectNorm == "NaN"), ] 
+
+# Response: remove rows where Total.Singing = 0 (NaN in proportion)
+resp <- subset(hoppers, !is.nan(ResponseNorm))
+
+# Rejection: remove rows where Harassment = 0 (NaN in proportion)
+rej  <- subset(hoppers, !is.nan(RejectNorm))
+```
+
+To run the GLMM we need to subset the data for the three possible combinations of species.
+First, we work with male behaviors.
+These are the subsets for the male behaviors
+
+```{r}
+lm_brubig <- hoppers %>% filter(Combination == "BruBru" | Combination == "BruBig"|
+                                Combination == "BigBru" | Combination == "BigBig")
+
+lm_brumol <- hoppers %>% filter(Combination == "BruBru" | Combination == "BruMol" |
+                                Combination == "MolBru" | Combination == "MolMol")
+
+lm_molbig <- hoppers %>% filter(Combination == "BigBig" | Combination == "BigMol" |
+                                  Combination == "MolBig" | Combination == "MolMol"
+```
+
+# MODEL ANALYSES
+
+Naming as: [model:additive/interaction]\_[combination]
+
+Male behaviors per combination
+
+## Combination: Bru - Big
+
+```{r}
+                            ### Combination: Bru - Big ###
+
+# Behavior: Call Singing (Indirect Singing) 
+interaction_indirect_brubig <- glmmTMB(Singing ~ Male*Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ), 
+                            family = nbinom2, data = lm_brubig) #m1
+
+
+additive_indirect_brubig <- glmmTMB(Singing ~ Male + Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ),
+                               family = nbinom2, data = lm_brubig)
+
+anova(interaction_indirect_brubig, additive_indirect_brubig)
+```
+
+```{r}
+# Behavior: Courtship singing (Direct Singing) 
+interaction_direct_brubig <- glmmTMB(Active.Singing ~ Male*Female + Type.F + Type.M +
+(1|Cage.males) + (1|Cage.females), 
+                            family = nbinom2, data = lm_brubig)
+
+additive_direct_brubig <- glmmTMB(Active.Singing ~ Male + Female + Type.F + Type.M + 
+(1|Cage.males) + (1|Cage.females),
+                               family = nbinom2, data = lm_brubig)
+
+anova(interaction_direct_brubig, additive_direct_brubig)
+
+```
+
+```{r}
+# Behavior: Mounting attempt (Harassment)
+interaction_harass_brubig <- glmmTMB(Harassment ~ Male*Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ), 
+                            family = nbinom2, data = lm_brubig)
+
+additive_harass_brubig <- glmmTMB(Harassment ~ Male + Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ),
+                               family = nbinom2, data = lm_brubig)
+
+anova(interaction_harass_brubig, additive_harass_brubig)
+```
+
+## Combination: Bru - Mol
+
+```{r}
+                            ### Combination: Bru - Mol ### 
+
+#Behavior: Call Singing (Indirect Singing)
+interaction_indirect_brumol <- glmmTMB(Singing ~ Male*Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ), 
+                            family = nbinom2, data = lm_brumol)
+
+
+additive_indirect_brumol <- glmmTMB(Singing ~ Male + Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ),
+                               family = nbinom2, data = lm_brumol)
+
+anova(interaction_indirect_brumol, additive_indirect_brumol)
+```
+
+```{r}
+# Behavior: Courtship singing (Direct/Active Singing)
+interaction_direct_brumol <- glmmTMB(Active.Singing ~ Male*Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ), 
+                            family = nbinom2, data = lm_brumol)
+
+additive_direct_brumol <- glmmTMB(Active.Singing ~ Male + Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ),
+                               family = nbinom2, data = lm_brumol)
+
+anova(interaction_direct_brumol, additive_direct_brumol)
+
+```
+
+```{r}
+# Behavior: Mounting attempt (Harassment)
+interaction_harass_brumol <- glmmTMB(Harassment ~ Male*Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ), 
+                            family = nbinom2, data = lm_brumol)
+
+additive_harass_brumol <- glmmTMB(Harassment ~ Male + Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ),
+                               family = nbinom2, data = lm_brumol)
+
+anova(interaction_harass_brumol, additive_harass_brumol)
+
+```
+
+## Combination: Mol - Big
+
+```{r}
+                              ### Combination:  Mol - Big ###
+
+#Behavior: Call Singing (Indirect Singing)
+interaction_indirect_molbig <- glmmTMB(Singing ~ Male*Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ), 
+                              family = nbinom2, data = lm_molbig)
+
+
+additive_indirect_molbig <- glmmTMB(Singing ~ Male + Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ),
+                                 family = nbinom2, data = lm_molbig)
+
+anova(interaction_indirect_molbig, additive_indirect_molbig)
+```
+
+```{r}
+# Behavior: Courtship Singing (Direct Singing) 
+interaction_direct_molbig <- glmmTMB(Active.Singing ~ Male*Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ), 
+                            family = nbinom2, data = lm_molbig)
+
+
+additive_direct_molbig <- glmmTMB(Active.Singing ~ Male + Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ),
+                               family = nbinom2, data = lm_molbig)
+
+anova(interaction_direct_molbig, additive_direct_molbig)
+```
+
+```{r}
+#Behavior: Mounting Attempt (Harassment) 
+interaction_harass_molbig <- glmmTMB(Harassment ~ Male*Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ), 
+                            family = nbinom2, data = lm_molbig)
+
+additive_harass_molbig <- glmmTMB(Harassment ~ Male + Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ),
+                               family = nbinom2, data = lm_molbig)
+
+anova(interaction_harass_molbig, additive_harass_molbig)
+
+```
+
+Then we analyze again for female behaviors per combination for the simplified models
+
+## Combination: Bru - Big
+
+```{r}
+                                     ### Combination: Bru - Big ###
+                                 
+# Subset per behavior for this combination
+resp_brubig <- resp %>% filter(Combination == "BruBru" | Combination == "BruBig"|
+                            Combination == "BigBig" | Combination == "BigBru")
+
+rej_brubig <- rej %>% filter(Combination == "BruBru" | Combination == "BruBig"|
+                            Combination == "BigBig" | Combination == "BigBru")
+
+#Behavior: Response
+interaction_resp_brubig <- glmmTMB(cbind(Response, Response_fail) ~ Male*Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ), 
+                              family = binomial, data = resp_brubig)
+
+additive_resp_brubig <- glmmTMB(cbind(Response, Response_fail) ~ Male + Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ),
+                                 family = binomial, data = resp_brubig)
+
+anova(interaction_resp_brubig, additive_resp_brubig)
+
+```
+
+```{r}
+# Behavior: Rejection
+
+interaction_rej_brubig <- glmmTMB(cbind(Hrejection, Rejection_fail) ~ Male*Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ), 
+                              family = binomial, data = rej_brubig)
+
+additive_rej_brubig <- glmmTMB(cbind(Hrejection, Rejection_fail) ~ Male + Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ),
+                                 family = binomial, data = rej_brubig)
+
+anova(interaction_rej_brubig, additive_rej_brubig)
+
+```
+
+## Combination: Bru - Mol
+
+```{r}
+                                     ### Combination: Bru - Mol ###
+# Subset per behavior for this combination
+resp_brumol <- resp %>% filter(Combination == "BruBru" | Combination == "BruMol"|
+                            Combination == "MolBru" | Combination == "MolMol")
+
+rej_brumol <- rej %>% filter(Combination == "BruBru" | Combination == "BruMol"|
+                            Combination == "MolBru" | Combination == "MolMol")
+#Behavior: Response
+interaction_resp_brumol <- glmmTMB(cbind(Response, Response_fail) ~ Male*Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ), 
+                              family = binomial, data = resp_brumol)
+
+additive_resp_brumol <- glmmTMB(cbind(Response, Response_fail) ~ Male + Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ),
+                                 family = binomial, data = resp_brumol)
+
+anova(interaction_resp_brumol, additive_resp_brumol)
+
+```
+
+```{r}
+
+# Behavior: Rejection
+
+interaction_rej_brumol <- glmmTMB(cbind(Hrejection, Rejection_fail) ~ Male*Female + Type.F + Type.M + (1|Cage.males) + (1|Cage.females), 
+                              family = binomial, data = rej_brumol)
+
+additive_rej_brumol <- glmmTMB(cbind(Hrejection, Rejection_fail) ~ Male + Female + Type.F + Type.M + (1|Cage.males) + (1|Cage.females),
+                                 family = binomial, data = rej_brumol)
+
+anova(interaction_rej_brumol, additive_rej_brumol)
+
+```
+
+```{r}
+# Behavior: Rejection w/ beta binomial distribution
+## DHARMa shows overdispersion and zero-inflation, so we fit with beta binomial distribution to see if it improves the fit
+
+interaction_rej_brumol_beta <- glmmTMB(cbind(Hrejection, Rejection_fail) ~ Male*Female + Type.F + Type.M + (1|Cage.males) + (1|Cage.females), 
+                              family = betabinomial, data = rej_brumol)
+
+additive_rej_brumol_beta <- glmmTMB(cbind(Hrejection, Rejection_fail) ~ Male + Female + Type.F + Type.M + (1|Cage.males) + (1|Cage.females),
+                                 family = betabinomial, data = rej_brumol)
+
+anova(interaction_rej_brumol_beta, additive_rej_brumol_beta)
+
+## check again with DHARMa
+# calculate the residuals for the model
+m28_beta <- simulateResiduals(fittedModel = interaction_rej_brumol_beta, plot = F)
+
+residuals(m28_beta)
+
+#plot simulation output
+plot(m28_beta)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m28_beta)
+testDispersion(m28_beta)
+testZeroInflation(m28_beta)
+testResiduals(m28_beta)
+
+```
+
+## Combination: Mol - Big
+
+```{r}
+                                     ### Combination: Mol - Big ###
+ 
+                                      
+# Subset per behavior for this combination
+resp_molbig <- resp %>% filter(Combination == "BigBig" | Combination == "BigMol"|
+                            Combination == "MolBig" | Combination == "MolMol")
+
+rej_molbig <- rej %>% filter(Combination == "BigBig" | Combination == "BigMol"|
+                            Combination == "MolBig" | Combination == "MolMol")
+
+#Behavior: Response  
+interaction_resp_molbig <- glmmTMB(cbind(Response, Response_fail) ~ Male*Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ), 
+                              family = binomial, data = resp_molbig)
+
+additive_resp_molbig <- glmmTMB(cbind(Response, Response_fail) ~ Male + Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ),
+                                 family = binomial, data = resp_molbig)
+
+anova(interaction_resp_molbig, additive_resp_molbig)
+
+```
+
+```{r}
+# Behavior: Rejection
+
+interaction_rej_molbig <- glmmTMB(cbind(Hrejection, Rejection_fail) ~ Male*Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ), 
+                              family = binomial, data = rej_molbig)
+
+additive_rej_molbig <- glmmTMB(cbind(Hrejection, Rejection_fail) ~ Male + Female + Type.F + Type.M + (1|Cage.males ) + (1|Cage.females ),
+                                 family = binomial, data = rej_molbig)
+
+anova(interaction_rej_molbig, additive_rej_molbig)
+
+```
+
+## Mating for all combinations
+
+```{r}
+
+# Behavior: Mating for all combos
+
+## Bru-Big
+
+interaction_mating_brubig <- glmmTMB(Mating ~ Male*Female + Type.F + Type.M + (1|Cage.males) + (1|Cage.females), 
+                            family = binomial, data = lm_brubig)
+
+additive_mating_brubig <- glmmTMB(Mating ~ Male + Female + Type.F + Type.M + (1|Cage.males) + (1|Cage.females), 
+                            family = binomial, data = lm_brubig)
+
+anova(interaction_mating_brubig, additive_mating_brubig)
+
+
+# GLM
+
+## Solving convergence issues:
+
+glm_int_brubig <- glm(Mating ~ Male*Female + Cage.males + Cage.females + Type.F + Type.M,  family = binomial, data = lm_brubig) 
+
+glm_add_brubig <- glm(Mating ~ Male + Female + Cage.males + Cage.females + Type.F + Type.M,  family = binomial, data = lm_brubig) 
+
+anova(glm(Mating ~ Male*Female + Cage.males + Cage.females + Type.F + Type.M,  family = binomial, data = lm_brubig), 
+      glm(Mating ~ Male + Female + Cage.males + Cage.females + Type.F + Type.M,  family = binomial, data = lm_brubig),
+      test="LRT")
+
+# calculate AIC for GLM models
+AIC(glm_int_brubig)
+AIC(glm_add_brubig)
+
+
+```
+
+```{r}
+## Bru-Mol
+interaction_mating_brumol <- glmmTMB(Mating ~ Male*Female + Type.F + Type.M + (1|Cage.males) + (1|Cage.females), 
+                            family = binomial, data = lm_brumol)
+
+additive_mating_brumol <- glmmTMB(Mating ~ Male + Female + Type.F + Type.M + (1|Cage.males) + (1|Cage.females), 
+                            family = binomial, data = lm_brumol)
+
+anova(interaction_mating_brumol, additive_mating_brumol)
+
+```
+
+```{r}
+## Mol-Big
+
+interaction_mating_molbig <- glmmTMB(Mating ~ Male*Female + Type.F + Type.M + (1|Cage.males) + (1|Cage.females), 
+                            family = binomial, data = lm_molbig)
+
+additive_mating_molbig <- glmmTMB(Mating ~ Male + Female + Type.F + Type.M + (1|Cage.males) + (1|Cage.females), 
+                            family = binomial, data = lm_molbig)
+
+anova(interaction_mating_molbig, additive_mating_molbig)
+
+# GLM
+
+## Solving convergence issues:
+
+glm_int_molbig <- glm(Mating ~ Male*Female + Cage.males + Cage.females + Type.F + Type.M,  family = binomial, data = lm_molbig) 
+
+glm_add_molbig <- glm(Mating ~ Male + Female + Cage.males + Cage.females + Type.F + Type.M,  family = binomial, data = lm_molbig) 
+
+anova(glm(Mating ~ Male*Female + Cage.males + Cage.females + Type.F + Type.M,  family = binomial, data = lm_molbig), 
+      glm(Mating ~ Male + Female + Cage.males + Cage.females + Type.F + Type.M,  family = binomial, data = lm_molbig),
+      test="LRT")
+
+# calculate AIC for GLM models
+AIC(glm_int_molbig )
+AIC(glm_add_molbig)
+
+```
+
+# Goodness-of-fit & residual plots
+
+We use the DHARMa package to simulate, calculate and plot residuals.
+
+### Bru-Big combination
+
+```{r}
+# For each behavior, we test the best model for residuals, uniformity, overdispersion, and inflation
+# calculate the residuals for the model
+m1 <- simulateResiduals(fittedModel = additive_indirect_brubig, plot = F)
+
+residuals(m1)
+
+#plot simulation output
+plot(m1)
+  
+#tests if the overall distribution conforms to expectations.
+testUniformity(m1)
+testDispersion(m1)
+testZeroInflation(m1)
+testResiduals(m1)
+```
+
+```{r}
+# calculate the residuals for the model
+m2 <- simulateResiduals(fittedModel = interaction_indirect_brubig, plot = F)
+
+residuals(m2)
+
+#plot simulation output
+plot(m2)
+  
+#tests if the overall distribution conforms to expectations.
+testUniformity(m2)
+testDispersion(m2)
+testZeroInflation(m2)
+testResiduals(m2)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m7 <- simulateResiduals(fittedModel = additive_direct_brubig, plot = F)
+
+residuals(m7)
+
+#plot simulation output
+plot(m7)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m7)
+testDispersion(m7)
+testZeroInflation(m7)
+testResiduals(m7)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m8 <- simulateResiduals(fittedModel = interaction_direct_brubig, plot = F)
+
+residuals(m8)
+
+#plot simulation output
+plot(m8)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m8)
+testDispersion(m8)
+testZeroInflation(m8)
+testResiduals(m8)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m19 <- simulateResiduals(fittedModel = additive_harass_brubig, plot = F)
+
+residuals(m19)
+
+#plot simulation output
+plot(m19)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m19)
+testDispersion(m19)
+testZeroInflation(m19)
+testResiduals(m19)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m20 <- simulateResiduals(fittedModel = interaction_harass_brubig, plot = F)
+
+residuals(m20)
+
+#plot simulation output
+plot(m20)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m20)
+testDispersion(m20)
+testZeroInflation(m20)
+testResiduals(m20)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m13 <- simulateResiduals(fittedModel = additive_resp_brubig, plot = F)
+
+residuals(m13)
+
+#plot simulation output
+plot(m13)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m13)
+testDispersion(m13)
+testZeroInflation(m13)
+testResiduals(m13)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m14 <- simulateResiduals(fittedModel = interaction_resp_brubig, plot = F)
+
+residuals(m14)
+
+#plot simulation output
+plot(m14)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m14)
+testDispersion(m14)
+testZeroInflation(m14)
+testResiduals(m14)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m25 <- simulateResiduals(fittedModel = additive_rej_brubig, plot = F)
+
+residuals(m25)
+
+#plot simulation output
+plot(m25)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m25)
+testDispersion(m25)
+testZeroInflation(m25)
+testResiduals(m25)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m26 <- simulateResiduals(fittedModel = interaction_rej_brubig, plot = F)
+
+residuals(m26)
+
+#plot simulation output
+plot(m26)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m26)
+testDispersion(m26)
+testZeroInflation(m26)
+testResiduals(m26)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m31 <- simulateResiduals(fittedModel = glm_int_brubig, plot = F)
+
+residuals(m31)
+
+#plot simulation output
+plot(m31)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m31)
+testDispersion(m31)
+testZeroInflation(m31)
+testResiduals(m31)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m32 <- simulateResiduals(fittedModel = glm_add_brubig, plot = F)
+
+residuals(m32)
+
+#plot simulation output
+plot(m32)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m32)
+testDispersion(m32)
+testZeroInflation(m32)
+testResiduals(m32)
+```
+
+### Bru-Mol combination
+
+```{r}
+# For each behavior, we test the best model for residuals, uniformity, overdispersion, and inflation
+
+# calculate the residuals for the model
+m3 <- simulateResiduals(fittedModel = additive_indirect_brumol, plot = F)
+
+residuals(m3)
+
+#plot simulation output
+plot(m3)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m3)
+testDispersion(m3)
+testZeroInflation(m3)
+testResiduals(m3)
+```
+
+```{r}
+# For each behavior, we test the best model for residuals, uniformity, overdispersion, and inflation
+
+# calculate the residuals for the model
+m4 <- simulateResiduals(fittedModel = interaction_indirect_brumol, plot = F)
+
+residuals(m4)
+
+#plot simulation output
+plot(m4)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m4)
+testDispersion(m4)
+testZeroInflation(m4)
+testResiduals(m4)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m9 <- simulateResiduals(fittedModel = additive_direct_brumol, plot = F)
+
+residuals(m9)
+
+#plot simulation output
+plot(m9)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m9)
+testDispersion(m9)
+testZeroInflation(m9)
+testResiduals(m9)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m10 <- simulateResiduals(fittedModel = interaction_direct_brumol, plot = F)
+
+residuals(m10)
+
+#plot simulation output
+plot(m10)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m10)
+testDispersion(m10)
+testZeroInflation(m10)
+testResiduals(m10)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m21 <- simulateResiduals(fittedModel = additive_harass_brumol, plot = F)
+
+residuals(m21)
+
+#plot simulation output
+plot(m21)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m21)
+testDispersion(m21)
+testZeroInflation(m21)
+testResiduals(m21)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m22 <- simulateResiduals(fittedModel = interaction_harass_brumol, plot = F)
+
+residuals(m22)
+
+#plot simulation output
+plot(m22)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m22)
+testDispersion(m22)
+testZeroInflation(m22)
+testResiduals(m22)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m15 <- simulateResiduals(fittedModel = additive_resp_brumol, plot = F)
+
+residuals(m15)
+
+#plot simulation output
+plot(m15)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m15)
+testDispersion(m15)
+testZeroInflation(m15)
+testResiduals(m15)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m16 <- simulateResiduals(fittedModel = interaction_resp_brumol, plot = F)
+
+residuals(m16)
+
+#plot simulation output
+plot(m16)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m16)
+testDispersion(m16)
+testZeroInflation(m16)
+testResiduals(m16)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m27 <- simulateResiduals(fittedModel = additive_rej_brumol, plot = F)
+
+residuals(m27)
+
+#plot simulation output
+plot(m27)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m27)
+testDispersion(m27)
+testZeroInflation(m27)
+testResiduals(m27)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m28 <- simulateResiduals(fittedModel = interaction_rej_brumol, plot = F)
+
+residuals(m28)
+
+#plot simulation output
+plot(m28)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m28)
+testDispersion(m28)
+testZeroInflation(m28)
+testResiduals(m28)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m33 <- simulateResiduals(fittedModel = additive_mating_brumol, plot = F)
+
+residuals(m33)
+
+#plot simulation output
+plot(m33)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m33)
+testDispersion(m33)
+testZeroInflation(m33)
+testResiduals(m33)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m34 <- simulateResiduals(fittedModel = interaction_mating_brumol, plot = F)
+
+residuals(m34)
+
+#plot simulation output
+plot(m34)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m34)
+testDispersion(m34)
+testZeroInflation(m34)
+testResiduals(m34)
+```
+
+### Mol-Big combination
+
+```{r}
+# calculate the residuals for the model
+m5 <- simulateResiduals(fittedModel = additive_indirect_molbig, plot = F)
+
+residuals(m5)
+
+#plot simulation output
+plot(m5)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m5)
+testDispersion(m5)
+testZeroInflation(m5)
+testResiduals(m5)
+```
+
+```{r}
+# calculate the residuals for the model
+m6 <- simulateResiduals(fittedModel = interaction_indirect_molbig, plot = F)
+
+residuals(m6)
+
+#plot simulation output
+plot(m6)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m6)
+testDispersion(m6)
+testZeroInflation(m6)
+testResiduals(m6)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m11 <- simulateResiduals(fittedModel = additive_direct_molbig, plot = F)
+
+residuals(m11)
+
+#plot simulation output
+plot(m11)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m11)
+testDispersion(m11)
+testZeroInflation(m11)
+testResiduals(m11)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m12 <- simulateResiduals(fittedModel = interaction_direct_molbig, plot = F)
+
+residuals(m12)
+
+#plot simulation output
+plot(m12)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m12)
+testDispersion(m12)
+testZeroInflation(m12)
+testResiduals(m12)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m23 <- simulateResiduals(fittedModel = additive_harass_molbig, plot = F)
+
+residuals(m23)
+
+#plot simulation output
+plot(m23)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m23)
+testDispersion(m23)
+testZeroInflation(m23)
+testResiduals(m23)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m24 <- simulateResiduals(fittedModel = interaction_harass_molbig, plot = F)
+
+residuals(m24)
+
+#plot simulation output
+plot(m24)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m24)
+testDispersion(m24)
+testZeroInflation(m24)
+testResiduals(m24)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m17 <- simulateResiduals(fittedModel = additive_resp_molbig, plot = F)
+
+residuals(m17)
+
+#plot simulation output
+plot(m17)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m17)
+testDispersion(m17)
+testZeroInflation(m17)
+testResiduals(m17)
+
+```
+
+```{r}
+
+# calculate the residuals for the model
+m18 <- simulateResiduals(fittedModel = interaction_resp_molbig, plot = F)
+
+residuals(m18)
+
+#plot simulation output
+plot(m18)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m18)
+testDispersion(m18)
+testZeroInflation(m18)
+testResiduals(m18)
+
+```
+
+```{r}
+# calculate the residuals for the model
+m30 <- simulateResiduals(fittedModel = interaction_rej_molbig, plot = F)
+
+residuals(m30)
+
+#plot simulation output
+plot(m30)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m30)
+testDispersion(m30)
+testZeroInflation(m30)
+testResiduals(m30)
+```
+
+```{r}
+
+## !!!! POTENTIAL ISSUES WITH ZERO INFLATION
+
+# calculate the residuals for the model
+m30 <- simulateResiduals(fittedModel = interaction_rej_molbig, plot = F)
+
+residuals(m30)
+
+#plot simulation output
+plot(m30)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m30)
+testDispersion(m30)
+testZeroInflation(m30)
+testResiduals(m30)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m35 <- simulateResiduals(fittedModel = glm_int_molbig, plot = F)
+
+residuals(m35)
+
+#plot simulation output
+plot(m35)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m35)
+testDispersion(m35)
+testZeroInflation(m35)
+testResiduals(m35)
+```
+
+```{r}
+
+# calculate the residuals for the model
+m36 <- simulateResiduals(fittedModel = glm_add_molbig, plot = F)
+
+residuals(m36)
+
+#plot simulation output
+plot(m36)
+
+#tests if the overall distribution conforms to expectations.
+testUniformity(m36)
+testDispersion(m36)
+testZeroInflation(m36)
+testResiduals(m36)
+```
