@@ -6,5 +6,5 @@ Repository for code related to the paper on assortative mating and reproductive 
 Authors:
 Dörte S. Neumeister, Irina Formoso, Oliver Hawlitschek, Alexander E. Hausmann, Dirk Metzler, Richard M. Merrill, Ricardo J. Pereira
 
-Corresponding authors: 
+For questions, please contact: 
 Dörte S. Neumeister dorteneumeister@gmail.com; Ricardo J. Pereira ricardo.pereira@smns-bw.de
