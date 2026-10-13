@@ -16,7 +16,7 @@ Divergent behaviors can facilitate species radiations, potentially contributing 
 Keywords: biguttulus group, sexual selection, behavioral isolation
 
 ### Data
-All data necessary to run this scripts is available at https://doi.org/10.5281/zenodo.23350277 
+All data related to this analyses is available at https://doi.org/10.5281/zenodo.23350277 
 
 ### Contents
 - `glmms_v2.Rmd`: R code for all GLMM models
