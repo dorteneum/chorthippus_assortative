@@ -5,7 +5,7 @@ Repository for code related to the paper on assortative mating and reproductive 
 **Authors:**
 Dörte S. Neumeister, Irina Formoso, Oliver Hawlitschek, Alexander E. Hausmann, Dirk Metzler, Richard M. Merrill, Ricardo J. Pereira
 
-Article accepted for publication by the Journal of Evolutionary Biology; in-prep
+Article accepted for publication by the Journal of Evolutionary Biology; in-prep  
 Pre-print:https://www.authorea.com/doi/full/10.22541/au.175346130.08571420/v1 
 
 For questions, please contact: 
