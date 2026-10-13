@@ -15,8 +15,11 @@ Dörte S. Neumeister dorteneumeister@gmail.com; Ricardo J. Pereira ricardo.perei
 Divergent behaviors can facilitate species radiations, potentially contributing to both pre- and postzygotic barriers. Although this often involves male and female behaviors, it is unclear how effectively individual behaviors contribute to reproductive isolation, particularly at early stages of speciation. Using no-choice behavioral assays, we investigate this question in three species of Chorthippus grasshoppers that diverged recently in the presence of gene flow. Our results show that all tested courtship behaviors depend on whether individuals are paired with conspecifics or heterospecifics, culminating in complete prezygotic isolation. Behavioral isolation is initiated by male courtship singing, with a strong preference for conspecific females, showing a substantial contribution of male preference to reproductive isolation. All interspecific crosses showed the same components of behavioral isolation and similar strength, with reproductive isolation being strongest for female response to male song and male mounting attempt. Our study supports the role of male preference in assortative mating and highlights the importance of the coupling of multiple behavioral barriers as potential drivers of rapid speciation and adaptive radiation. 
 Keywords: biguttulus group, sexual selection, behavioral isolation
 
+### Data
+All data necessary to run this scripts is available at https://doi.org/10.5281/zenodo.23350277 
+
 ### Contents
 - `glmms_v2.Rmd`: R code for all GLMM models
 - `strength_RI_v2.Rmd`: R code for calculating strength of RI, absolute, and relative contributions
-- `DHARMa_outputs.pdf`: Model fit analysis results
+- `DHARMa_outputs.pdf`: Script and results of model fit analysis using the DHARMa package in R studio
 - `references.bib`: references included in `glmms_v2.Rmd`
