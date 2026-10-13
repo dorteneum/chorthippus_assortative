@@ -11,20 +11,12 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Packages
-
-```{r}
-.libPaths(c(.libPaths(),"/dss/dsshome1/lxc06/ru87mis/Rstudio/4.4"))
-
-#set wd
-setwd('/dss/dsslegfs01/pr53da/pr53da-dss-0029/big_assortative')
-
 #Load the file. 
-hoppers <- read.csv("hoppers2_femresp_corrected.csv", sep = ";")
+hoppers <- read.csv("DataClean.csv", sep = ";")
 #View(hoppers)
 
 
-## THIS VERSION USES THE PACKAGE GLMMTMB INSTEAD OF LME4 TO FIT THE GLMMs
+## THIS VERSION USES THE PACKAGE GLMMTMB TO FIT THE GLMMs
 
 # Install required packages 
 install.packages("glmmTMB") #GLMM modeling
@@ -48,28 +40,6 @@ library(bbmle)
 library(DHARMa)
 library(emmeans)
 ```
-
-# REVIEW 1
-
-Date of review: Oct 2025 Date of edits: Dec 2025
-
-Here, we try to address the issues raised by the reviewers for the first version of our submitted paper.
-
-Changes:
-
-\- After discussing with Dirk, we will add the origin (Type.F/Type.M) to the model as a fixed effect factor.
-
-\- To avoid confusion, for the reviewed version, we have changed the naming of the models.
-The reduced models are now called additive models and the saturated models are not called interaction models.
-
-\- To check whether the results are not affected by the type of analysis, i.e.
-GLM or GLMMM, I have run the GLMs for all behaviors and combinations, not only for those that raised convergence or singularity issues.
--- This section is no longer relevant, since only a single model raised convergence issues with the glmmTMB pacakge.
-
-\- To improve model fitting and reduce singularity and convergence issues, we used the 'glmmTMB' package, which did not throw back singularity or convergence issues, and therefore we will move forward with this package for our analysis.
-- Check model fit and residual plots using DHARMa package.
-
-\- Since DHARMa showed issues for most of the models in one way or another, here, in v2 of the code, first, we are replacing the family type for fitting the models from poisson to negative binomial (nbinom2), for those that used a poisson distribution.
 
 Species Key:
 
