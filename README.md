@@ -1,6 +1,6 @@
 # Early acting components of courtship contribute to prezygotic reproductive isolation between closely related _Chorthippus_ grasshopper species
 
-Repository for code related to the paper on assortative mating and reproductive isolation of the biguttulus complex
+Repository for code related to the paper on assortative mating and reproductive isolation of the biguttulus complex. This code is also publicly available at https://doi.org/10.5281/zenodo.23987352 
 
 **Authors:**
 Dörte S. Neumeister, Irina Formoso, Oliver Hawlitschek, Alexander E. Hausmann, Dirk Metzler, Richard M. Merrill, Ricardo J. Pereira
